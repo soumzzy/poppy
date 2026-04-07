@@ -1,0 +1,498 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Poppy</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: #0a0a0a; overflow: hidden; cursor: none; }
+  canvas { display: block; }
+  #mode-switcher {
+    position: fixed;
+    bottom: 24px;
+    left: 50%;
+    transform: translateX(-50%);
+    display: flex;
+    gap: 6px;
+    z-index: 10;
+    opacity: 0;
+    transition: opacity 0.4s;
+    cursor: default;
+  }
+  body:hover #mode-switcher, body:active #mode-switcher { opacity: 1; }
+  .mode-btn {
+    width: 32px; height: 32px;
+    border-radius: 50%;
+    border: 2px solid rgba(255,255,255,0.3);
+    cursor: pointer;
+    transition: all 0.3s;
+    position: relative;
+  }
+  .mode-btn:hover { transform: scale(1.2); }
+  .mode-btn.active { border-color: rgba(255,255,255,0.9); transform: scale(1.15); }
+  .mode-btn[data-mode="dark"] { background: radial-gradient(circle, #c0281a 40%, #1a1a1a 100%); }
+  .mode-btn[data-mode="light"] { background: radial-gradient(circle, #d44030 40%, #f0ece4 100%); border-color: rgba(0,0,0,0.2); }
+  .mode-btn[data-mode="light"].active { border-color: rgba(0,0,0,0.7); }
+  .mode-btn[data-mode="bw"] { background: radial-gradient(circle, #888 40%, #111 100%); }
+  .mode-btn[data-mode="spring"] { background: radial-gradient(circle, #e84040 30%, #5a9e3e 100%); }
+  .mode-btn[data-mode="cyan"] { background: radial-gradient(circle, #e8dcc0 40%, #0e2a4a 100%); }
+  .mode-label {
+    position: absolute;
+    bottom: 38px; left: 50%;
+    transform: translateX(-50%);
+    font: 10px/1 'Helvetica Neue', sans-serif;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    white-space: nowrap;
+    color: rgba(255,255,255,0.7);
+    opacity: 0;
+    transition: opacity 0.2s;
+    pointer-events: none;
+  }
+  .mode-btn:hover .mode-label { opacity: 1; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="mode-switcher">
+  <div class="mode-btn active" data-mode="dark"><span class="mode-label">Dark</span></div>
+  <div class="mode-btn" data-mode="light"><span class="mode-label">Light</span></div>
+  <div class="mode-btn" data-mode="bw"><span class="mode-label">B&W</span></div>
+  <div class="mode-btn" data-mode="spring"><span class="mode-label">Spring</span></div>
+  <div class="mode-btn" data-mode="cyan"><span class="mode-label">Cyanotype</span></div>
+</div>
+<script>
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+
+let W, H;
+let mouse = { x: -1000, y: -1000 };
+let poppies = [];
+let time = 0;
+let currentMode = 'dark';
+
+const themes = {
+  dark: {
+    bg: [10, 10, 10],
+    trail: [10, 10, 10, 0.28],
+    stem: [35, 50, 28],
+    leaf: [28, 40, 22],
+    center: [8, 8, 8],
+    vignette: [0, 0, 0, 0.6],
+    scanlineAlpha: 0.03,
+    scanlineColor: '0,0,0',
+    glowIntensity: 0.2,
+    palettes: [
+      [55, 50, 48], [85, 18, 15], [160, 25, 18], [195, 40, 28], [220, 55, 32]
+    ],
+    paletteWeights: [0.12, 0.18, 0.3, 0.25, 0.15],
+  },
+  light: {
+    bg: [242, 238, 230],
+    trail: [242, 238, 230, 0.35],
+    stem: [75, 105, 55],
+    leaf: [65, 95, 45],
+    center: [45, 30, 20],
+    vignette: [225, 220, 210, 0.35],
+    scanlineAlpha: 0.012,
+    scanlineColor: '180,175,165',
+    glowIntensity: 0.1,
+    palettes: [
+      [185, 45, 35], [210, 55, 40], [228, 70, 50], [165, 35, 30], [238, 85, 65]
+    ],
+    paletteWeights: [0.2, 0.25, 0.25, 0.15, 0.15],
+  },
+  bw: {
+    bg: [6, 6, 6],
+    trail: [6, 6, 6, 0.25],
+    stem: [45, 45, 45],
+    leaf: [38, 38, 38],
+    center: [3, 3, 3],
+    vignette: [0, 0, 0, 0.7],
+    scanlineAlpha: 0.04,
+    scanlineColor: '0,0,0',
+    glowIntensity: 0.25,
+    palettes: [
+      [45, 45, 45], [75, 75, 75], [115, 115, 115], [155, 155, 155], [195, 195, 195]
+    ],
+    paletteWeights: [0.2, 0.25, 0.25, 0.2, 0.1],
+  },
+  spring: {
+    bg: [18, 30, 16],
+    trail: [18, 30, 16, 0.28],
+    stem: [55, 130, 45],
+    leaf: [50, 118, 38],
+    center: [55, 38, 10],
+    vignette: [8, 16, 6, 0.45],
+    scanlineAlpha: 0.018,
+    scanlineColor: '0,0,0',
+    glowIntensity: 0.18,
+    palettes: [
+      [220, 55, 45], [240, 85, 55], [255, 175, 45], [255, 135, 75], [248, 205, 95],
+      [225, 115, 175], [195, 75, 145]
+    ],
+    paletteWeights: [0.2, 0.15, 0.15, 0.15, 0.1, 0.13, 0.12],
+  },
+  cyan: {
+    bg: [12, 36, 62],
+    trail: [12, 36, 62, 0.28],
+    stem: [140, 170, 195],
+    leaf: [120, 155, 185],
+    center: [180, 195, 210],
+    vignette: [5, 20, 40, 0.6],
+    scanlineAlpha: 0.03,
+    scanlineColor: '5,20,40',
+    glowIntensity: 0.25,
+    palettes: [
+      [170, 190, 210], [195, 210, 225], [220, 230, 240], [145, 170, 195], [235, 240, 248]
+    ],
+    paletteWeights: [0.2, 0.25, 0.25, 0.15, 0.15],
+  },
+};
+
+function getTheme() { return themes[currentMode]; }
+
+function resize() {
+  W = canvas.width = window.innerWidth;
+  H = canvas.height = window.innerHeight;
+  if (poppies.length === 0) initPoppies();
+}
+
+// Seeded noise for organic motion
+function noise(x, y) {
+  const n = Math.sin(x * 12.9898 + y * 78.233) * 43758.5453;
+  return n - Math.floor(n);
+}
+
+class Poppy {
+  constructor(x, y) {
+    this.baseX = x;
+    this.baseY = y;
+    this.stemHeight = 130 + Math.random() * 300;
+    this.phase = Math.random() * Math.PI * 2;
+    this.swaySpeed = 0.25 + Math.random() * 0.35;
+    this.swayAmount = 6 + Math.random() * 14;
+    this.petalSize = 14 + Math.random() * 24;
+    this.colorRoll = Math.random();
+    this.opacity = 0.45 + Math.random() * 0.55;
+    this.stemWidth = 0.3 + Math.random() * 0.5;
+    this.flickerPhase = Math.random() * Math.PI * 2;
+    this.disturbance = 0;
+    this.disturbDir = 0;
+    this.isBud = Math.random() < 0.15;
+    this.budDroop = 0.3 + Math.random() * 0.5;
+
+    // Organic stem character — slight S-curve and kinks
+    this.stemBend1 = (Math.random() - 0.5) * 15;
+    this.stemBend2 = (Math.random() - 0.5) * 10;
+    this.stemKink = 0.3 + Math.random() * 0.4; // where the kink is
+
+    // Petal variation for realistic flower shape
+    this.petalCount = 4 + Math.floor(Math.random() * 2);
+    this.petalAngles = [];
+    this.petalSizes = [];
+    this.petalSkews = [];
+    for (let i = 0; i < this.petalCount; i++) {
+      this.petalAngles.push((i / this.petalCount) * Math.PI * 2 + (Math.random() - 0.5) * 0.4);
+      this.petalSizes.push(0.7 + Math.random() * 0.5);
+      this.petalSkews.push((Math.random() - 0.5) * 0.3);
+    }
+
+    // Staccato timing — each poppy has its own rhythm of jerks
+    this.staccatoPhase = Math.random() * 100;
+    this.staccatoFreq = 2 + Math.random() * 3;
+    this.staccatoAmount = 0.3 + Math.random() * 0.5;
+
+    // Leaf data
+    this.leaves = [];
+    const leafCount = Math.random() < 0.4 ? 0 : (Math.random() < 0.6 ? 1 : 2);
+    for (let i = 0; i < leafCount; i++) {
+      this.leaves.push({
+        pos: 0.2 + Math.random() * 0.5,
+        side: Math.random() > 0.5 ? 1 : -1,
+        size: 6 + Math.random() * 8,
+        angle: (Math.random() - 0.5) * 0.8,
+        segments: 3 + Math.floor(Math.random() * 3),
+      });
+    }
+  }
+
+  getColor() {
+    const theme = getTheme();
+    let acc = 0;
+    for (let i = 0; i < theme.palettes.length; i++) {
+      acc += theme.paletteWeights[i];
+      if (this.colorRoll < acc) return theme.palettes[i];
+    }
+    return theme.palettes[theme.palettes.length - 1];
+  }
+
+  update(t) {
+    const dx = this.baseX - mouse.x;
+    const dy = (this.baseY - this.stemHeight * 0.5) - mouse.y;
+    const dist = Math.sqrt(dx * dx + dy * dy);
+    const influence = Math.max(0, 1 - dist / 220);
+    if (influence > 0) {
+      this.disturbance += (influence * 45 - this.disturbance) * 0.06;
+      this.disturbDir = Math.atan2(dy, dx);
+    } else {
+      this.disturbance *= 0.95;
+    }
+    // Flickering — more erratic, LCD-like
+    const flicker1 = Math.sin(t * 3.1 + this.flickerPhase);
+    const flicker2 = Math.sin(t * 7.3 + this.flickerPhase * 2.1);
+    this.currentOpacity = this.opacity * (0.82 + 0.12 * flicker1 + 0.06 * flicker2);
+  }
+
+  // Get a point along the stem curve at parameter t (0=base, 1=tip)
+  getStemPoint(t, sway, distX, distY) {
+    const baseX = this.baseX;
+    const baseY = this.baseY;
+    const tipX = baseX + sway + distX + this.stemBend2;
+    const tipY = baseY - this.stemHeight + distY;
+    // Two control points for a more natural S-curve
+    const c1x = baseX + this.stemBend1 * 0.5 + sway * 0.2 + distX * 0.2;
+    const c1y = baseY - this.stemHeight * this.stemKink;
+    const c2x = baseX + sway * 0.8 + distX * 0.7 + this.stemBend2 * 0.7;
+    const c2y = baseY - this.stemHeight * 0.75;
+    // Cubic bezier
+    const mt = 1 - t;
+    const x = mt*mt*mt*baseX + 3*mt*mt*t*c1x + 3*mt*t*t*c2x + t*t*t*tipX;
+    const y = mt*mt*mt*baseY + 3*mt*mt*t*c1y + 3*mt*t*t*c2y + t*t*t*tipY;
+    // Tangent for angle
+    const tx = 3*mt*mt*(c1x-baseX) + 6*mt*t*(c2x-c1x) + 3*t*t*(tipX-c2x);
+    const ty = 3*mt*mt*(c1y-baseY) + 6*mt*t*(c2y-c1y) + 3*t*t*(tipY-c2y);
+    return { x, y, angle: Math.atan2(ty, tx) };
+  }
+
+  draw(t) {
+    const theme = getTheme();
+    // Staccato sway — base smooth sway + jerky micro-movements
+    const smoothSway = Math.sin(t * this.swaySpeed + this.phase) * this.swayAmount;
+    const staccato = Math.round(Math.sin(t * this.staccatoFreq + this.staccatoPhase) * 2) / 2;
+    const sway = smoothSway + staccato * this.staccatoAmount * this.swayAmount * 0.3;
+
+    const distX = Math.cos(this.disturbDir) * this.disturbance;
+    const distY = Math.sin(this.disturbDir) * this.disturbance * 0.3;
+
+    ctx.globalAlpha = this.currentOpacity;
+
+    // --- Draw stem as a cubic bezier ---
+    const tip = this.getStemPoint(1, sway, distX, distY);
+    const base = this.getStemPoint(0, sway, distX, distY);
+    const c1 = this.getStemPoint(0.33, sway, distX, distY);
+    const c2 = this.getStemPoint(0.66, sway, distX, distY);
+
+    // --- Draw stem — ghostly thin, barely visible ---
+    const [sr, sg, sb] = theme.stem;
+    ctx.beginPath();
+    ctx.moveTo(base.x, base.y);
+    ctx.bezierCurveTo(c1.x, c1.y, c2.x, c2.y, tip.x, tip.y);
+    ctx.strokeStyle = `rgba(${sr},${sg},${sb},${this.currentOpacity * 0.2})`;
+    ctx.lineWidth = this.stemWidth;
+    ctx.lineCap = 'round';
+    ctx.stroke();
+
+    // --- Flower or bud ---
+    if (this.isBud) {
+      this.drawBud(tip.x, tip.y, tip.angle, t);
+    } else {
+      this.drawFlower(tip.x, tip.y, tip.angle, t);
+    }
+
+    ctx.globalAlpha = 1;
+  }
+
+  drawBud(x, y, stemAngle, t) {
+    const theme = getTheme();
+    const [r, g, b] = this.getColor();
+    const size = this.petalSize * 0.5;
+    // Drooping bud
+    const droop = stemAngle + Math.PI * 0.3 * this.budDroop;
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.rotate(droop + Math.PI / 2);
+    // Green sepal
+    const [sr, sg, sb] = theme.stem;
+    ctx.beginPath();
+    ctx.ellipse(0, 0, size * 0.35, size * 0.65, 0, 0, Math.PI * 2);
+    ctx.fillStyle = `rgba(${sr},${sg},${sb},${this.currentOpacity * 0.8})`;
+    ctx.fill();
+    // Hint of color peeking through
+    ctx.beginPath();
+    ctx.ellipse(0, -size * 0.2, size * 0.2, size * 0.3, 0, 0, Math.PI);
+    ctx.fillStyle = `rgba(${r},${g},${b},${this.currentOpacity * 0.5})`;
+    ctx.fill();
+    ctx.restore();
+  }
+
+  drawFlower(x, y, stemAngle, t) {
+    const theme = getTheme();
+    const [r, g, b] = this.getColor();
+    const breathe = 1 + 0.05 * Math.sin(t * 1.2 + this.phase);
+    const size = this.petalSize * breathe;
+
+    // Spectral glow — bioluminescent quality
+    const grad = ctx.createRadialGradient(x, y, 0, x, y, size * 2.5);
+    grad.addColorStop(0, `rgba(${r},${g},${b},${this.currentOpacity * theme.glowIntensity})`);
+    grad.addColorStop(0.5, `rgba(${r},${g},${b},${this.currentOpacity * theme.glowIntensity * 0.3})`);
+    grad.addColorStop(1, `rgba(${r},${g},${b},0)`);
+    ctx.beginPath();
+    ctx.arc(x, y, size * 2.5, 0, Math.PI * 2);
+    ctx.fillStyle = grad;
+    ctx.fill();
+
+    // Petals — each one unique, tissue-paper thin, overlapping
+    const baseAngle = t * 0.08 + this.phase;
+    for (let i = 0; i < this.petalCount; i++) {
+      const angle = baseAngle + this.petalAngles[i];
+      const pSize = size * this.petalSizes[i];
+      const skew = this.petalSkews[i];
+
+      ctx.save();
+      ctx.translate(x, y);
+      ctx.rotate(angle);
+
+      // Each petal is a curved, slightly irregular shape
+      ctx.beginPath();
+      ctx.moveTo(0, 0);
+      // Petal as two bezier curves forming a cupped shape
+      const pw = pSize * 0.55;
+      const ph = pSize * 1.0;
+      ctx.bezierCurveTo(
+        -pw * 0.6 + skew * 5, -ph * 0.3,
+        -pw * 1.1, -ph * 0.7,
+        -pw * 0.15, -ph
+      );
+      ctx.bezierCurveTo(
+        pw * 0.15, -ph * 1.05,
+        pw * 1.1, -ph * 0.65,
+        0, 0
+      );
+      ctx.closePath();
+
+      // Petal fill — semi-transparent for overlap effect
+      ctx.fillStyle = `rgba(${r},${g},${b},${this.currentOpacity * 0.55})`;
+      ctx.fill();
+
+      // Delicate vein/edge highlight
+      ctx.strokeStyle = `rgba(${r},${g},${b},${this.currentOpacity * 0.25})`;
+      ctx.lineWidth = 0.5;
+      ctx.stroke();
+
+      // Inner vein
+      ctx.beginPath();
+      ctx.moveTo(0, 0);
+      ctx.quadraticCurveTo(-pw * 0.15, -ph * 0.5, -pw * 0.05, -ph * 0.85);
+      ctx.strokeStyle = `rgba(${Math.max(r-30,0)},${Math.max(g-15,0)},${Math.max(b-15,0)},${this.currentOpacity * 0.15})`;
+      ctx.lineWidth = 0.4;
+      ctx.stroke();
+
+      ctx.restore();
+    }
+
+    // Dark center with stamens
+    const [cr, cg, cb] = theme.center;
+    // Center disc
+    ctx.beginPath();
+    ctx.arc(x, y, size * 0.22, 0, Math.PI * 2);
+    ctx.fillStyle = `rgba(${cr},${cg},${cb},${this.currentOpacity * 0.9})`;
+    ctx.fill();
+    // Tiny stamen dots around center
+    for (let i = 0; i < 6; i++) {
+      const sa = (i / 6) * Math.PI * 2 + this.phase;
+      const sx = x + Math.cos(sa) * size * 0.16;
+      const sy = y + Math.sin(sa) * size * 0.16;
+      ctx.beginPath();
+      ctx.arc(sx, sy, 0.8, 0, Math.PI * 2);
+      ctx.fillStyle = `rgba(${cr+20},${cg+20},${cb+10},${this.currentOpacity * 0.6})`;
+      ctx.fill();
+    }
+  }
+}
+
+function initPoppies() {
+  poppies = [];
+  const count = Math.floor(W * H / 5500);
+  for (let i = 0; i < count; i++) {
+    const x = Math.random() * W;
+    const y = H * 0.42 + Math.random() * H * 0.58;
+    poppies.push(new Poppy(x, y));
+  }
+  poppies.sort((a, b) => a.baseY - b.baseY);
+}
+
+function animate() {
+  time += 0.016;
+  const theme = getTheme();
+  const [tr, tg, tb, ta] = theme.trail;
+
+  ctx.fillStyle = `rgba(${tr},${tg},${tb},${ta})`;
+  ctx.fillRect(0, 0, W, H);
+
+  for (const p of poppies) {
+    p.update(time);
+    p.draw(time);
+  }
+
+  // Scanlines
+  ctx.fillStyle = `rgba(${theme.scanlineColor},${theme.scanlineAlpha})`;
+  for (let y = 0; y < H; y += 3) {
+    ctx.fillRect(0, y, W, 1);
+  }
+
+  // Vignette
+  const [vr, vg, vb, va] = theme.vignette;
+  const vig = ctx.createRadialGradient(W / 2, H / 2, H * 0.3, W / 2, H / 2, H * 0.9);
+  vig.addColorStop(0, `rgba(${vr},${vg},${vb},0)`);
+  vig.addColorStop(1, `rgba(${vr},${vg},${vb},${va})`);
+  ctx.fillStyle = vig;
+  ctx.fillRect(0, 0, W, H);
+
+  requestAnimationFrame(animate);
+}
+
+// Mode switching
+function setMode(mode) {
+  currentMode = mode;
+  document.querySelectorAll('.mode-btn').forEach(b => b.classList.remove('active'));
+  document.querySelector(`.mode-btn[data-mode="${mode}"]`).classList.add('active');
+  const isLight = mode === 'light';
+  document.querySelectorAll('.mode-label').forEach(l => {
+    l.style.color = isLight ? 'rgba(0,0,0,0.6)' : 'rgba(255,255,255,0.7)';
+  });
+  document.querySelectorAll('.mode-btn').forEach(b => {
+    if (b.classList.contains('active')) {
+      b.style.borderColor = isLight ? 'rgba(0,0,0,0.7)' : 'rgba(255,255,255,0.9)';
+    } else {
+      b.style.borderColor = isLight ? 'rgba(0,0,0,0.2)' : 'rgba(255,255,255,0.3)';
+    }
+  });
+}
+
+document.querySelectorAll('.mode-btn').forEach(btn => {
+  btn.addEventListener('click', () => setMode(btn.dataset.mode));
+});
+
+window.addEventListener('keydown', e => {
+  const modes = ['dark', 'light', 'bw', 'spring', 'cyan'];
+  const idx = parseInt(e.key) - 1;
+  if (idx >= 0 && idx < modes.length) setMode(modes[idx]);
+});
+
+window.addEventListener('resize', resize);
+canvas.addEventListener('mousemove', e => { mouse.x = e.clientX; mouse.y = e.clientY; });
+canvas.addEventListener('mouseleave', () => { mouse.x = -1000; mouse.y = -1000; });
+canvas.addEventListener('touchmove', e => {
+  e.preventDefault();
+  mouse.x = e.touches[0].clientX;
+  mouse.y = e.touches[0].clientY;
+}, { passive: false });
+canvas.addEventListener('touchend', () => { mouse.x = -1000; mouse.y = -1000; });
+
+resize();
+animate();
+</script>
+</body>
+</html>
